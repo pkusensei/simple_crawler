@@ -46,56 +46,62 @@ async def get_content(link: str) -> str:
     return content
 
 
-async def write_html(fname: str, title: str, content: str, id: int = 0):
-    async with await trio.open_file("{}/{}".format(SAVE_DIR, fname), "w", encoding="utf8") as f:
+async def write_content(fname: str, title: str, content: str, id: int = 0):
+    async with await trio.open_file(f"{SAVE_DIR}/{fname}", "w", encoding="utf8") as f:
         await f.writelines("<!DOCTYPE html>\n<html>\n")
-        await f.writelines("<head>\n<title>{}</title>\n</head>\n".format(title))
+        await f.writelines(f"<head>\n<title>{title}</title>\n</head>\n")
         await f.writelines("<body>\n")
-        await f.writelines("<h3>{}</h3>\n".format(title))
+        await f.writelines(f"<h3>{title}</h3>\n")
         await f.writelines(content)
+        await f.writelines("\n<br/><br/>\n")
 
         if id > 0:
-            previous = "{:0>3}.html".format(id - 1)
-            await f.writelines("\t<a href=""{}"">上一节</a><br/>\n".format(previous))
-        next = "{:0>3}.html".format(id + 1)
-        await f.writelines("\t<a href=""{}"">下一节</a><br/>\n".format(next))
+            previous = f"{id - 1:0>3}.html"
+            await f.writelines(f'\t<a href="{previous}">上一节</a><br/>\n')
+        next = f"{id + 1:0>3}.html"
+        await f.writelines(f'\t<a href="{next}">下一节</a> <br/>\n')
 
         await f.writelines("</body>\n</html>")
+    assert f.closed
+
+
+async def write_menu(body: str):
+    async with await trio.open_file(f"{SAVE_DIR}/menu.html", "w", encoding="utf8") as f:
+        await f.writelines("<!DOCTYPE html>\n<html>\n")
+        await f.writelines("<head>\n</head>\n")
+        await f.writelines("<body>\n")
+        await f.writelines(body)
+        await f.writelines("</body>\n</html>")
+
     assert f.closed
 
 
 async def main(menu: str):
+    menu_body = ""
     bodies = []
     if not os.path.isdir(SAVE_DIR):
         os.mkdir(SAVE_DIR)
-        
-    async with await trio.open_file("{}/{}".format(SAVE_DIR, "menu.html"), "w", encoding="utf8") as f:
-        await f.writelines("<!DOCTYPE html>\n<html>\n")
-        await f.writelines("<head>\n</head>\n")
-        await f.writelines("<body>\n")
 
-        count = 0
-        async for title, link in get_links(menu):
-            if "插图" in title:
-                await f.writelines("<br/><br/>\n")
-                continue
-            fname = "{:0>3}.html".format(count)
-            await f.writelines("\t<a href=""{}"">{}</a><br/>\n".format(fname, title))
-            if count < LAST_STORE:
-                count += 1
-                continue
-            content = await get_content(link)
-            bodies.append((fname, title, content, count))
+    count = 0
+    async for title, link in get_links(menu):
+        if "插图" in title:
+            menu_body += "<br/><br/>\n"
+            continue
+        fname = f"{count:0>3}.html"
+        menu_body += f'\t<a href="{fname}">{title}</a><br/>\n'
+        if count < LAST_STORE:
             count += 1
-            # break
-        await f.writelines("</body>\n</html>")
+            continue
+        content = await get_content(link)
+        bodies.append((fname, title, content, count))
+        count += 1
 
-    assert f.closed
     async with trio.open_nursery() as n:
+        n.start_soon(write_menu, menu_body)
         for fname, title, content, count in bodies:
-            n.start_soon(write_html, fname, title, content, count)
+            n.start_soon(write_content, fname, title, content, count)
 
 
 if __name__ == "__main__":
-    assert len(LINK) > 0
+    assert len(LINK) > 0 and LINK.endswith('/')
     trio.run(main, LINK)
