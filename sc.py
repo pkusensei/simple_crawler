@@ -9,6 +9,7 @@ Ditch asyncio for trio
 20200618
 """
 
+import argparse
 import os
 from typing import AsyncIterator
 
@@ -25,24 +26,23 @@ LAST_STORE: int = 0
 SAVE_DIR: str = "save"
 
 
-session = Session()
+session = None
 
 
 async def get_plain_text(link: str) -> str:
+    assert session is not None, "session is not initialized!"
+
     resp = await session.get(link)
     resp.encoding = "gbk"
     return resp.content
 
 
-async def get_page_links(menu: str) -> AsyncIterator[tuple[str, str]]:
-    assert not menu.endswith("index.htm"), "Trim URL first!"
-    assert menu.endswith('/')
-
-    plain = await get_plain_text(menu)
+async def get_page_links(menu_url: str) -> AsyncIterator[tuple[str, str]]:
+    plain = await get_plain_text(menu_url)
     s = soup(plain, "html.parser")
     for link in s.find_all("td", class_="ccss"):
         if link.a is not None:
-            yield link.a.string, menu+link.a.get("href")
+            yield link.a.string, menu_url+link.a.get("href")
 
 
 async def get_text_content(link: str) -> str:
@@ -63,9 +63,9 @@ async def write_text_content(fname: str, title: str, content: str, id: int = 0):
 
         if id > 0:
             previous = f"{id - 1:0>3}.html"
-            await f.writelines(f'\t<a href="{previous}">上一节</a><br/>\n')
+            await f.writelines(f'\t<a href="{previous}">上一页</a><br/>\n')
         next = f"{id + 1:0>3}.html"
-        await f.writelines(f'\t<a href="{next}">下一节</a> <br/>\n')
+        await f.writelines(f'\t<a href="{next}">下一页</a><br/>\n')
 
         await f.writelines("</body>\n</html>")
     assert f.closed
@@ -85,10 +85,18 @@ async def write_pic_html(page_id: int, pic_page_id: int, img_count: int):
         await f.writelines("<body>\n")
         for idx in range(img_count):
             await f.writelines(f"<img src=\"{pic_page_id:0>2}.{idx:0>2}.jpg\">\n")
+        if page_id > 0:
+            previous = f"{page_id - 1:0>3}.html"
+            await f.writelines(f'\t<a href="{previous}">上一页</a><br/>\n')
+        next = f"{page_id + 1:0>3}.html"
+        await f.writelines(f'\t<a href="{next}">下一页</a><br/>\n')
+
         await f.writelines("</body>\n</html>")
 
 
 async def save_pics(link: str, pic_page_id: int, page_id: int):
+    assert session is not None, "session is not initialized!"
+
     img_count = 0
     async for url in get_img_urls(link):
         data = await session.get(url)
@@ -110,7 +118,7 @@ async def write_menu(body: str):
     assert f.closed
 
 
-async def main(menu: str):
+async def process(menu_url: str):
     menu_body = ""
     if not os.path.isdir(SAVE_DIR):
         os.mkdir(SAVE_DIR)
@@ -118,10 +126,11 @@ async def main(menu: str):
     page_id = 0
     pic_page_id = 0
     async with trio.open_nursery() as n:
-        async for title, link in get_page_links(menu):
+        async for title, link in get_page_links(menu_url):
             if "插图" in title:
                 n.start_soon(save_pics, link, pic_page_id, page_id)
                 pic_page_id += 1
+                page_id += 1
                 continue
             fname = f"{page_id:0>3}.html"
             menu_body += f'\t<a href="{fname}">{title}</a><br/>\n'
@@ -134,5 +143,21 @@ async def main(menu: str):
         n.start_soon(write_menu, menu_body)
 
 
+def main():
+    global session
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("index", help="URL to index page")
+    args = parser.parse_args()
+
+    url: str = args.index
+    if url.endswith("index.htm"):
+        url = url[:-9]
+
+    assert len(url) > 0 and url.endswith('/')
+    session = Session()
+    trio.run(process, url)
+
+
 if __name__ == "__main__":
-    trio.run(main, LINK)
+    main()
