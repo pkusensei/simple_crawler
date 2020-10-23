@@ -80,9 +80,8 @@ async def get_img_urls(link: str) -> AsyncIterator[str]:
 
 async def write_pic_html(page_id: int, pic_page_id: int, img_count: int):
     async with await trio.open_file(f"{SAVE_DIR}/{page_id:0>3}.html", "w", encoding="utf8") as f:
-        await f.writelines("<!DOCTYPE html>\n<html>\n")
-        await f.writelines("<head>\n</head>\n")
-        await f.writelines("<body>\n")
+        await f.writelines("<!DOCTYPE html>\n<html>\n<head>\n</head>\n<body>\n")
+
         for idx in range(img_count):
             await f.writelines(f"<img src=\"{pic_page_id:0>2}.{idx:0>2}.jpg\">\n")
         if page_id > 0:
@@ -92,6 +91,7 @@ async def write_pic_html(page_id: int, pic_page_id: int, img_count: int):
         await f.writelines(f'\t<a href="{next}">下一页</a><br/>\n')
 
         await f.writelines("</body>\n</html>")
+    assert f.closed
 
 
 async def save_pics(link: str, pic_page_id: int, page_id: int):

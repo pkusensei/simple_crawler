@@ -1,3 +1,7 @@
 .vscode/
-venv/
+
+py/venv/
+
+rs/target/
+
 save/
