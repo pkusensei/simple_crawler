@@ -16,24 +16,26 @@ const LINK_TD_CLASS: &str = "ccss";
 
 pub async fn process_index_page(client: Arc<Client>, url: &str) -> Result<(), Error> {
     let url = url.strip_suffix("index.htm").unwrap_or(url);
-    let (body, links) = compose_index_page(&client, url).await?;
+    let text = crate::get_html_string(&client, url).await?;
+    let doc = Html::parse_document(&text);
+
+    let (body, links) = compose_index_page(&doc).await?;
 
     if fs::metadata(SAVE_DIR).await.is_err() {
         fs::create_dir_all(SAVE_DIR).await?
     }
-
     let handle = tokio::spawn(async move { write_index_page(&body).await });
+
+    let links: Vec<_> = links
+        .into_iter()
+        .map(|link| format!("{}{}", url, link))
+        .collect();
     process_pages(client, &links).await?;
     handle.await?;
     Ok(())
 }
 
-async fn compose_index_page(
-    client: &Client,
-    index_url: &str,
-) -> Result<(String, Vec<String>), Error> {
-    let text = crate::get_html_string(&client, index_url).await?;
-    let doc = Html::parse_document(&text);
+async fn compose_index_page(doc: &Html) -> Result<(String, Vec<String>), Error> {
     let td_selector = Selector::parse(&format!("td[class=\"{}\"]", LINK_TD_CLASS)).or_else(
         |_| -> Result<_, Error> {
             Err(format!("Invalid td or class=\"{}\" attribute", LINK_TD_CLASS).into())
@@ -46,7 +48,7 @@ async fn compose_index_page(
     for td in doc.select(&td_selector) {
         let inner = Html::parse_fragment(&td.inner_html());
         let a_selector = Selector::parse("a").or_else(|_| -> Result<_, Error> {
-            Err(format!("Cannot find <a/> tag from {}", td.inner_html()).into())
+            Err(format!("Cannot parse <a/> tag for {}", td.inner_html()).into())
         })?;
 
         if let Some(a_tag) = inner.select(&a_selector).next() {
@@ -55,7 +57,7 @@ async fn compose_index_page(
             })?;
             let title: String = a_tag.text().collect();
             body = format!("{}[{}](./{:03}.md)\n", body, title, count);
-            links.push(format!("{}{}", index_url, page_link));
+            links.push(page_link.to_owned());
             count += 1;
         }
     }
