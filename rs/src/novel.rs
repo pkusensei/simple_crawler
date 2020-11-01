@@ -13,6 +13,7 @@ use crate::{Error, SAVE_DIR};
 const TEXT_ID: &str = "content";
 const IMG_CLASS: &str = "imagecontent";
 const LINK_TD_CLASS: &str = "ccss";
+const VOLUME_TD_CLASS: &str = "vcss";
 
 pub async fn process_index_page(client: Arc<Client>, url: &str) -> Result<(), Error> {
     let url = url.strip_suffix("index.htm").unwrap_or(url);
@@ -36,16 +37,19 @@ pub async fn process_index_page(client: Arc<Client>, url: &str) -> Result<(), Er
 }
 
 async fn compose_index_page(doc: &Html) -> Result<(String, Vec<String>), Error> {
-    let td_selector = Selector::parse(&format!("td[class=\"{}\"]", LINK_TD_CLASS)).or_else(
-        |_| -> Result<_, Error> {
-            Err(format!("Invalid td or class=\"{}\" attribute", LINK_TD_CLASS).into())
-        },
-    )?;
+    let td_selector =
+        Selector::parse("td").or_else(|_| -> Result<_, Error> { Err("Invalid td tag".into()) })?;
 
     let mut body = String::new();
     let mut links = vec![];
     let mut count = 0;
     for td in doc.select(&td_selector) {
+        if Some(VOLUME_TD_CLASS) == td.value().attr("class") {
+            let vol_title: String = td.text().collect();
+            body = format!("{}<br><br>\n{}<br>\n", body, vol_title);
+            continue;
+        }
+
         let inner = Html::parse_fragment(&td.inner_html());
         let a_selector = Selector::parse("a").or_else(|_| -> Result<_, Error> {
             Err(format!("Cannot parse <a/> tag for {}", td.inner_html()).into())
@@ -56,7 +60,7 @@ async fn compose_index_page(doc: &Html) -> Result<(String, Vec<String>), Error> 
                 format!("Cannot find href attribute from {}", td.inner_html()).into()
             })?;
             let title: String = a_tag.text().collect();
-            body = format!("{}[{}](./{:03}.md)\n", body, title, count);
+            body = format!("{}[{}](./{:03}.md)<br>\n", body, title, count);
             links.push(page_link.to_owned());
             count += 1;
         }
@@ -101,7 +105,8 @@ async fn process_pages(client: Arc<Client>, urls: &[String]) -> Result<(), Error
         .await
         .into_iter()
         .collect::<Result<Vec<_>, _>>()
-        .map_or_else(|e| Err(e.into()), |_| Ok(()))
+        .and_then(|_| Ok(()))?;
+    Ok(())
 }
 
 async fn process_text_page(html_str: String, url: &str, page_id: u16) {
@@ -115,7 +120,7 @@ async fn process_text_page(html_str: String, url: &str, page_id: u16) {
     let text = match page_id {
         0 => format!("{}\n[下一页]({:03}.md)", content, page_id + 1),
         _ => format!(
-            "{}\n[上一页]({:03}.md)\n[下一页]({:03}.md)",
+            "{}\n[上一页]({:03}.md)<br>\n[下一页]({:03}.md)",
             content,
             page_id - 1,
             page_id + 1
@@ -212,7 +217,8 @@ async fn save_pics_on_page(
         .await
         .into_iter()
         .collect::<Result<Vec<_>, _>>()
-        .map_or_else(|e| Err(e.into()), |_| Ok(count as u16))
+        .and_then(|_| Ok(()))?;
+    Ok(count as u16)
 }
 
 fn get_pic_urls_on_page(html_str: String) -> Result<Vec<String>, Error> {
